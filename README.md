@@ -1,0 +1,197 @@
+# OpAMP MVP Setup Guide
+
+This guide walks through setting up an OpenTelemetry Agent Management Protocol (OpAMP) server with HTTP transport, TLS certificates, and testing with the OpenTelemetry Collector.
+
+## Step 0: Create Workspace
+
+```bash
+mkdir opamp-mvp
+cd opamp-mvp
+```
+
+## Step 1: Initialize Go Module
+
+```bash
+go mod init opamp-mvp
+```
+
+## Step 2: Create main.go
+
+```bash
+touch main.go.
+The main.go is in the repo.
+```
+
+**Paste the final working main.go** (the one with:
+- HTTP OpAMP
+- hex-encoded instance_uid
+- REST APIs
+- HTTPS server
+- ConnContext wired)
+
+👉 **Do not modify it.** That file is already correct and battle-tested.
+
+## Step 3: Download Dependencies
+
+```bash
+go mod tidy
+```
+
+This pulls:
+- `github.com/open-telemetry/opamp-go`
+- protobuf dependencies
+
+**If this fails → stop and fix it. Don't proceed.**
+
+## Step 4: Generate TLS Certificates (Dev Only)
+
+The collector will connect using HTTPS with `insecure_skip_verify: true`.
+
+```bash
+openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes \
+  -keyout server.key \
+  -out server.crt \
+  -subj "/CN=host.docker.internal"
+```
+
+**Verify:**
+
+```bash
+ls
+# main.go  go.mod  go.sum  server.crt  server.key
+```
+
+## Step 5: Run the OpAMP Server
+
+```bash
+go run .
+```
+
+**Expected log:**
+
+```
+OpAMP MVP listening on https://0.0.0.0:4320
+```
+
+Leave this running.
+
+## Step 6: Sanity Check Server
+
+In a new terminal:
+
+```bash
+curl -k https://localhost:4320/healthz
+```
+
+**Expected:**
+
+```
+ok
+```
+
+**If this fails → do not proceed.**
+
+## Step 7: Create Collector Config (collector.yaml)
+
+```bash
+touch collector.yaml
+```
+
+**Paste exactly this:**
+
+```yaml
+extensions:
+  opamp:
+    server:
+      http:
+        endpoint: https://host.docker.internal:4320/v1/opamp
+        tls:
+          insecure_skip_verify: true
+        polling_interval: 10s
+    capabilities:
+      reports_health: true
+      reports_effective_config: true
+      reports_available_components: true
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+      http:
+
+exporters:
+  debug:
+
+service:
+  extensions: [opamp]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [debug]
+  telemetry:
+    logs:
+      level: debug
+```
+
+### Important Notes
+
+- `server.http` is mandatory for HTTP mode
+- `endpoint` and `tls` cannot be under `server` directly
+- This is why your earlier config failed
+
+## Step 8: Run Collector (Agent)
+
+From the same directory:
+
+```bash
+docker run --rm -it \
+  --add-host=host.docker.internal:host-gateway \
+  -v "$PWD/collector.yaml:/etc/otelcol/config.yaml:ro" \
+  otel/opentelemetry-collector-contrib:0.141.0 \
+  --config=/etc/otelcol/config.yaml
+```
+
+### Why --add-host?
+
+- Ensures Docker can reach your host on macOS
+- Prevents silent connection failures
+
+You should see OpAMP logs in debug mode.
+
+## Step 9: Verify Agent Registration
+
+Back in another terminal:
+
+```bash
+curl -k https://localhost:4320/api/agents
+```
+
+**Expected output:**
+
+```json
+[
+  {
+    "instance_uid": "7ac460c117724737b535ac9b184f90ee",
+    "last_seen": "...",
+    "agent_description_json": "...",
+    "health_json": "...",
+    "effective_config_b64": "...",
+    "available_components_json": "..."
+  }
+]
+```
+
+### What This Confirms
+
+- Agent successfully contacted `/v1/opamp`
+- Server decoded AgentToServer
+- `instance_uid` handled correctly (binary → hex)
+- Health + config reporting works
+
+## Step 10: Inspect a Single Agent
+
+```bash
+curl -k https://localhost:4320/api/agents/<instance_uid>
+```
+
+This simulates what a UI would do.
