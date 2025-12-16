@@ -193,6 +193,10 @@ curl -k https://localhost:4320/api/agents
 ```bash
 curl -k https://localhost:4320/api/agents/<instance_uid>
 ```
+
+```
+Demo for /agents
+```
 <img width="1917" height="486" alt="Screenshot 2025-12-15 at 9 11 27 PM" src="https://github.com/user-attachments/assets/c1917b8f-ef6e-432a-a568-efa63beaff4f" />
 
 This simulates what a UI would do.
